@@ -1,0 +1,255 @@
+= Pulsar policy configuration
+
+This document outlines the logical constructs of an Apache Pulsar&trade; cluster, and the policies that are available for configuration at each tier of the Pulsar hierarchy. 
+
+* xref:pulsar-policy-config.adoc#tenant[Tenant-level policies]
+* xref:pulsar-policy-config.adoc#namespace[Namespace-level policies]
+* xref:pulsar-policy-config.adoc#topic[Topic-level policies]
+
+[#tenant]
+== Tenant policies
+
+The tenant sits at the top of the Pulsar hierarchy and represents a business unit. For example, a mobile application could be represented as a tenant called `mobile-app`: 
+
+[source,bash]
+----
+persistent://mobile-app/namespace/topic
+----
+
+=== Control access
+
+When creating a tenant, assign admin roles using the `--admin-roles` (or `-r`) flag, and clusters using the `--allowed-clusters` (or `-c`) flag. 
+
+[source,bash]
+----
+pulsar-admin tenants create my-tenant \
+  --admin-roles role1,role2,role3 \
+  --allowed-clusters cluster1
+----
+
+To update admin roles in a previously created tenant:
+
+[source,bash]
+----
+pulsar-admin tenants update my-tenant \
+  --admin-roles role1,role2,role3 \
+  --allowed-clusters cluster1
+----
+
+[#namespace]
+== Namespace policies
+
+Multiple namespaces can reside in a tenant. For example, each microservice our `mobile-app` tenant requires could be represented by one namespace called `microservice`:
+[source,bash]
+----
+persistent://mobile-app/microservice/topic
+----
+
+A majority of configurable policies in Pulsar are set within namespaces. To view a namespace's current policies: 
+
+[tabs]
+====
+Bash::
++
+--
+[source,bash]
+----
+pulsar-admin namespaces policies my-tenant/my-namespace
+----
+--
++
+Result::
++
+--
+[source,bash]
+----
+{
+  "auth_policies": {
+    "namespace_auth": {},
+    "destination_auth": {}
+  },
+  "replication_clusters": [],
+  "bundles_activated": true,
+  "bundles": {
+    "boundaries": [
+      "0x00000000",
+      "0xffffffff"
+    ],
+    "numBundles": 1
+  },
+  "backlog_quota_map": {},
+  "persistence": null,
+  "latency_stats_sample_rate": {},
+  "message_ttl_in_seconds": 0,
+  "retention_policies": null,
+  "deleted": false
+}
+----
+--
+====
+
+=== Configure replication clusters
+
+Set replication clusters for a namespace. Pulsar will internally replicate published messages from one cluster to another.
+
+[source,bash]
+----
+pulsar-admin namespaces set-clusters my-tenant/my-namespace \
+--clusters cluster1
+----
+
+Check which clusters a namespace is replicating to:
+[tabs]
+====
+Bash::
++
+--
+[source,bash]
+----
+pulsar-admin namespaces get-clusters my-tenant/cluster1/my-namespace
+----
+--
++
+Result::
++
+--
+[source,bash]
+----
+cluster2
+----
+--
+====
+
+=== Configure backlog quota policies
+
+Configure backlog quota policy for a namespace. By default, Pulsar retains all unacked messages indefinitely, but Pulsar also supports overriding backlog quota policy by namespace. 
+
+[source,bash]
+----
+pulsar-admin namespaces set-backlog-quota my-tenant/my-namespace \
+--limit 2G \
+--limitTime 24000 \
+--policy producer_request_hold
+----
+
+The `--policy` flag controls what action the broker takes when the `limit` is reached. 
+
+* `producer_request_hold` - the broker sends an exception to the producers to indicate they should stop sending messages. +
+* `producer_exception`- the broker disconnects any existing producers. +
+* `consumer_backlog_eviction` - the broker discards all existing unacked messages from the topic.
+
+=== Configure persistence
+
+Configure persistence policies for topics within a namespace. 
+
+[source,bash]
+----
+pulsar-admin namespaces set-persistence \
+--bookkeeper-ack-quorum 2 \
+--bookkeeper-ensemble 3 \
+--bookkeeper-write-quorum 2 \
+--ml-mark-delete-max-rate 0 my-tenant/my-namespace
+----
+
+* `Bookkeeper-ack-quorum`: Number of acks (guaranteed copies) to wait for each entry, default: 0
+
+* `Bookkeeper-ensemble`: Number of bookies to use for a topic, default: 0
+
+* `Bookkeeper-write-quorum`: How many writes to make of each entry, default: 0
+
+* `Ml-mark-delete-max-rate`: Throttling rate of mark-delete operation (0 means no throttle), default: 0
+
+=== Configure retention 
+
+Set the `storageSizeInGB` or `retentionTimeInMinutes` that a single topic within the namespace should not exceed. For example, set `my-namespace` to retain up to 10 GB of messages less than 24 hours old:
+
+[source,bash]
+----
+pulsar-admin namespaces set-retention my-tenant/my-namespace \
+--time 24h \
+--size 10G
+----
+
+=== Configure message Time To Live (TTL)
+
+Configure message expiration policies for unacked messages.
+
+[source,bash]
+----
+pulsar-admin namespaces set-message-ttl my-tenant/my-namespace \
+--messageTTL 120
+----
+
+=== Configure dispatch throttling by topic
+
+Set `--msg-dispatch-rate` to throttle message dispatch rate by topic. 
+
+[source,bash]
+----
+pulsar-admin namespaces set-dispatch-rate my-tenant/my-namespace \
+  --msg-dispatch-rate 1000 \
+  --byte-dispatch-rate 1048576 \
+  --dispatch-rate-period 1
+----
+
+* `--msg-dispatch-rate` throttles by number of messages per second.
+* `--byte-dispatch-rates` throttles by the number of message-bytes per second.
+* `--dispatch-rate-period` is measured in seconds. 
+
+=== Configure dispatch throttling by subscription
+
+Set `--msg-dispatch-rate` to throttle message dispatch rate by subscription. 
+
+[source,bash]
+----
+pulsar-admin namespaces set-subscription-dispatch-rate my-tenant/my-namespace \
+  --msg-dispatch-rate 1000 \
+  --byte-dispatch-rate 1048576 \
+  --dispatch-rate-period 1
+----
+
+* `--msg-dispatch-rate` throttles by number of messages per second.
+* `--byte-dispatch-rates` throttles by the number of message-bytes per second.
+* `--dispatch-rate-period` is measured in seconds. 
+
+=== Configure deduplication snapshot interval
+
+Set the `deduplicationSnapShotInterval` for topics in the namespace. 
+
+[source,bash]
+----
+pulsar-admin namespaces set-deduplication-snapshot-interval my-tenant/my-namespace \
+--interval 1000
+----
+
+=== Configure namespace isolation policies
+
+Allocate resources in your namespace. When a broker isolation policy is set on a namespace, Pulsar will try to assign brokers from the primary group to the topics that belong to the namespace. If there are not enough brokers in the primary group, brokers from the secondary group will be assigned if specified. 
+
+[source,bash]
+----
+pulsar-admin ns-isolation-policy set \
+--auto-failover-policy-type min_available \ 
+--auto-failover-policy-params min_limit=1,usage_threshold=80 \ 
+--namespaces my-tenant/my-namespace \
+--primary 7.32.133.237.* \ my-cluster policy-name
+--secondary 7.32.133.238.* \ my-cluster policy-name
+----
+
+[#topic]
+== Topic policies
+
+Multiple topics are managed within a namespace. For example, we might need an `inventory` topic in our `microservice` namespace. Both reside within the `mobile-app` tenant. 
+
+[source,bash]
+----
+persistent://mobile-app/microservice/inventory
+----
+
+Topics are the communication channel in Pulsar. All messages are written to and read from topics. Subscription types control the messaging pattern (pub-sub, first-in-first-out, etc.).
+
+== What's next?
+
+For more on deploying a Pulsar cluster, see the xref:quickstart-server-installs.adoc[Quickstart for Bare Metal/VM Installations].
+
+
